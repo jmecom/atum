@@ -1,48 +1,31 @@
 CC=clang
 
-LDFLAGS=
+LDFLAGS=-dynamiclib
 CFLAGS=-Wall -Werror
-INCLUDE=
+INCLUDE=-Iinc
 
-BUILD=build/macos
+BUILD_DIR=build
+SOURCE_DIR=src
 
-all: libatum
+SRC=$(wildcard $(SOURCE_DIR)/*.c)
+OBJ=$(addprefix $(BUILD_DIR)/,$(notdir $(SRC:.c=.o)))
 
-build/%.o: src/%.c
+LIBATUM=$(BUILD_DIR)/libatum.dylib
+LIBATUM_DEBUG=$(BUILD_DIR)/libatum-debug.dylib
+
+all: $(LIBATUM)
+
+$(BUILD_DIR)/%.o: $(SOURCE_DIR)/%.c
 	$(CC) -c $(INCLUDE) -o $@ $< $(CFLAGS)
 
-libatum: $(OBJ)
+$(LIBATUM): $(OBJ)
+	$(CC) $(CFLAGS) $(OBJ) -o $@ $(LDFLAGS) $(LDLIBS)
+
+$(LIBATUM_DEBUG): $(OBJ)
+	CFLAGS+=-g
 	$(CC) $(CFLAGS) $(OBJ) -o $@ $(LDFLAGS) $(LDLIBS)
 
 clean:
-	rm -f build/*
+	rm -rf $(BUILD_DIR)/*
 
-# PROG=cryptopals
-
-# CC=gcc
-# CFLAGS=-Wall -Werror -Wno-pragma-once-outside-header -g
-
-# INCLUDE=-I/usr/local/opt/openssl/include
-# LDFLAGS=-L/usr/local/opt/openssl/lib
-# LDLIBS=-lssl -lcrypto
-
-# BUILD_DIR=obj/
-# SOURCE_DIR=src/
-
-# SRC=$(wildcard $(SOURCE_DIR)*.c)
-# OBJ=$(addprefix $(BUILD_DIR),$(notdir $(SRC:.c=.o)))
-
-# all: $(PROG)
-
-# obj/%.o: $(SOURCE_DIR)%.c
-# 	$(CC) -c $(INCLUDE) -o $@ $< $(CFLAGS)
-
-# $(PROG): $(OBJ)
-# 	$(CC) $(CFLAGS) $(OBJ) -o $@ $(LDFLAGS) $(LDLIBS)
-
-# clean:
-# 	rm -f $(BUILD_DIR)*
-# 	rm -f ./$(PROG)
-
-# .PHONY: all
-# .PHONY: clean
+.PHONY: clean
