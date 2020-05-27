@@ -19,11 +19,11 @@ $(BUILD_DIR)/%.o: $(SOURCE_DIR)/%.c
 	$(CC) -c $(INCLUDE) -o $@ $< $(CFLAGS)
 
 $(LIBATUM): $(OBJ)
-	$(CC) $(CFLAGS) $(OBJ) -o $@ $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CFLAGS) $(OBJ) -o $@ $(LDFLAGS)
 
 $(LIBATUM_DEBUG): $(OBJ)
 	CFLAGS+=-g
-	$(CC) $(CFLAGS) $(OBJ) -o $@ $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CFLAGS) $(OBJ) -o $@ $(LDFLAGS)
 
 clean:
 	rm -rf $(BUILD_DIR)/*
