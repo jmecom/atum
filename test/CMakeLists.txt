@@ -9,7 +9,7 @@ else()
     message(STATUS "Found CppUTest version ${CPPUTEST_VERSION}")
 endif()
 
-include_directories(${CPPUTEST_INCLUDE_DIRS} ../src/)
+include_directories(${CPPUTEST_INCLUDE_DIRS})
 link_libraries(${CPPUTEST_LIBRARIES})
 
 set(TEST_APP_NAME libatumtests)
