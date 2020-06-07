@@ -10,7 +10,6 @@ else()
 endif()
 
 include_directories(${CPPUTEST_INCLUDE_DIRS})
-link_libraries(${CPPUTEST_LIBRARIES})
 
 set(TEST_APP_NAME libatumtests)
 
