@@ -2,6 +2,6 @@
 
 cd ../build/example
 ./target &
-sudo ./injector $! payload.dylib
+sudo ./injector $! libpayload.dylib
 sleep 1
 pkill target

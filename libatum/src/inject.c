@@ -2,6 +2,7 @@
 
 #include <mach/mach.h>
 #include <mach/error.h>
+#include <sys/stat.h>
 #include <dlfcn.h>
 
 #include "log.h"
@@ -45,13 +46,19 @@ int inject_library(pid_t target_pid, const char *lib)
     task_t target = MACH_PORT_NULL;
     mach_vm_address_t code = 0;
     mach_vm_address_t stack = 0;
+    struct stat statbuf;
 
     int ar = ATUM_FAILURE;
     mach_error_t kr;
 
-    // 0. Check if target is 64bit
+    // 0. Check if target is 64bit and that library is present
     if (!process_is_64_bit(target_pid)) {
         ERROR("Target process (%d) is not 64bit", target_pid);
+        return ATUM_FAILURE;
+    }
+
+    if (stat(lib, &statbuf) != 0) {
+        ERROR("Cannot open library %s", lib);
         return ATUM_FAILURE;
     }
 
@@ -74,12 +81,12 @@ int inject_library(pid_t target_pid, const char *lib)
     }
 
     // 3. Patch code
-    char *possible_patch_location = (loader_code);
+    char *possible_patch_location = loader_code;
     for (int i = 0; i < CODE_SIZE; i++) {
         possible_patch_location++;
 
         uint64_t addr_pthreadcreate = (uint64_t) dlsym(RTLD_DEFAULT, "pthread_create_from_mach_thread");
-        uint64_t addr_dlopen = (uint64_t)dlopen;
+        uint64_t addr_dlopen = (uint64_t) dlopen;
 
         if (memcmp(possible_patch_location, "PTHRDCRT", 8) == 0) {
             memcpy(possible_patch_location, &addr_pthreadcreate, 8);
@@ -109,7 +116,7 @@ int inject_library(pid_t target_pid, const char *lib)
     }
 
     // Mark stack readble
-    kr = vm_protect(target, stack, STACK_SIZE, TRUE, VM_PROT_READ);
+    kr = vm_protect(target, stack, STACK_SIZE, TRUE, VM_PROT_READ | VM_PROT_WRITE);
     if (kr != KERN_SUCCESS) {
         ERROR("Couldn't mark stack as readable ('%s')", mach_error_string(kr));
         return ATUM_MACH_FAILURE;
