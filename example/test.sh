@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
 
+cd ../build/example
 ./target &
-sudo ./inject $! payload.dylib
+sudo ./injector $! payload.dylib
 sleep 1
 pkill target

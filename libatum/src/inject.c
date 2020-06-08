@@ -2,10 +2,12 @@
 
 #include <mach/mach.h>
 #include <mach/error.h>
+#include <dlfcn.h>
 
 #include "log.h"
 #include "loader.h"
 #include "util.h"
+#include "thread.h"
 
 kern_return_t mach_vm_allocate(
         vm_map_t target,
@@ -41,7 +43,7 @@ int inject_library(pid_t target_pid, const char *lib)
     }
 
     task_t target = MACH_PORT_NULL;
-    mach_vm_address_t text = 0;
+    mach_vm_address_t code = 0;
     mach_vm_address_t stack = 0;
 
     int ar = ATUM_FAILURE;
@@ -66,24 +68,41 @@ int inject_library(pid_t target_pid, const char *lib)
         return ar;
     }
 
-    ar = remote_alloc(target, &text, CODE_SIZE, VM_FLAGS_ANYWHERE);
+    ar = remote_alloc(target, &code, CODE_SIZE, VM_FLAGS_ANYWHERE);
     if (ar != ATUM_SUCCESS) {
         return ar;
     }
 
     // 3. Patch code
+    char *possible_patch_location = (loader_code);
+    for (int i = 0; i < CODE_SIZE; i++) {
+        possible_patch_location++;
 
-    // [todo]
+        uint64_t addr_pthreadcreate = (uint64_t) dlsym(RTLD_DEFAULT, "pthread_create_from_mach_thread");
+        uint64_t addr_dlopen = (uint64_t)dlopen;
+
+        if (memcmp(possible_patch_location, "PTHRDCRT", 8) == 0) {
+            memcpy(possible_patch_location, &addr_pthreadcreate, 8);
+        }
+
+        if (memcmp(possible_patch_location, "DLOPEN__", 6) == 0) {
+            memcpy(possible_patch_location, &addr_dlopen, sizeof(uint64_t));
+        }
+
+        if (memcmp(possible_patch_location, "LIBLIBLIB", 9) == 0) {
+            strcpy(possible_patch_location, lib);
+        }
+    }
 
     // 4. Write the code
-    kr = mach_vm_write(target, text, (vm_address_t) loader_code, sizeof(loader_code));
+    kr = mach_vm_write(target, code, (vm_address_t) loader_code, sizeof(loader_code));
     if (kr != KERN_SUCCESS) {
         ERROR("Unable to write code ('%s')", mach_error_string(kr));
         return ATUM_MACH_FAILURE;
     }
 
     // Mark code executable
-    kr = vm_protect(target, text, sizeof(loader_code), FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+    kr = vm_protect(target, code, sizeof(loader_code), FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
     if (kr != KERN_SUCCESS) {
         ERROR("Couldn't mark code as executable ('%s')", mach_error_string(kr));
         return ATUM_MACH_FAILURE;
@@ -97,6 +116,11 @@ int inject_library(pid_t target_pid, const char *lib)
     }
 
     // 5. Create thread
+    thread_act_t thread;
+    ar = create_remote_thread(target, &thread, stack, STACK_SIZE, code, CODE_SIZE);
+    if (ar != ATUM_SUCCESS) {
+        return ar;
+    }
 
     return ATUM_SUCCESS;
 }
