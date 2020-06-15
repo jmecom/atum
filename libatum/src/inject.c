@@ -27,6 +27,7 @@ kern_return_t mach_vm_write(
 #define STACK_SIZE (65536)
 #define CODE_SIZE  (128)
 
+/*
 static int remote_alloc(task_t target, mach_vm_address_t *address, mach_vm_size_t size, int flags)
 {
     kern_return_t kr;
@@ -36,7 +37,44 @@ static int remote_alloc(task_t target, mach_vm_address_t *address, mach_vm_size_
     }
     return ATUM_SUCCESS;
 }
+*/
 
+#include "foo.h"
+int inject_library(pid_t target_pid, const char *lib)
+{
+    if (!lib) {
+        return ATUM_FAILURE;
+    }
+
+    task_t target = MACH_PORT_NULL;
+    struct stat statbuf;
+
+    mach_error_t kr;
+
+    // 0. Check if target is 64bit and that library is present
+    if (!process_is_64_bit(target_pid)) {
+        ERROR("Target process (%d) is not 64bit", target_pid);
+        return ATUM_FAILURE;
+    }
+
+    if (stat(lib, &statbuf) != 0) {
+        ERROR("Cannot open library %s", lib);
+        return ATUM_FAILURE;
+    }
+
+    // 1. Acquire target task port
+    kr = task_for_pid(mach_task_self(), target_pid, &target);
+    if (kr != KERN_SUCCESS) {
+        ERROR("task_for_pid on %d failed ('%s')", target_pid, mach_error_string(kr));
+        return ATUM_MACH_FAILURE;
+    }
+
+    void *out = NULL;
+    int f = load_library_into_task(target, lib, &out);
+    return f;
+}
+
+/*
 int inject_library(pid_t target_pid, const char *lib)
 {
     if (!lib) {
@@ -115,10 +153,11 @@ int inject_library(pid_t target_pid, const char *lib)
         return ATUM_MACH_FAILURE;
     }
 
-    // Mark stack readble
+    // Mark stack rw
+    // TODO: Don't want to do have to do this
     kr = vm_protect(target, stack, STACK_SIZE, TRUE, VM_PROT_READ | VM_PROT_WRITE);
     if (kr != KERN_SUCCESS) {
-        ERROR("Couldn't mark stack as readable ('%s')", mach_error_string(kr));
+        ERROR("Couldn't mark stack as rw ('%s')", mach_error_string(kr));
         return ATUM_MACH_FAILURE;
     }
 
@@ -131,3 +170,4 @@ int inject_library(pid_t target_pid, const char *lib)
 
     return ATUM_SUCCESS;
 }
+*/
