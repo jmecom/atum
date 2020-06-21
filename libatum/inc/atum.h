@@ -1,6 +1,7 @@
 #pragma once
 
 #include <unistd.h>
+#include <mach/mach.h>
 
 typedef enum {
     ATUM_SUCCESS = 0,

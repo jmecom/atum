@@ -27,18 +27,26 @@ kern_return_t mach_vm_write(
 #define STACK_SIZE (65536)
 #define CODE_SIZE  (128)
 
-#define CHECK(ret, expected, function) \
+#define MACH_CHECK(function) \
     do { \
-        if (ret != expected) { \
-            ERROR("%s failed on line %d: (\'%s\')", function, __LINE__-1, mach_error_string(kr)); \
+        if (kr != KERN_SUCCESS) { \
+            ERROR("%s failed @ %s:%d (\'%s\')", function, __FILE__, __LINE__-1, mach_error_string(kr)); \
             return ATUM_MACH_FAILURE; \
+        } \
+    } while (0)
+
+#define ATUM_CHECK(function) \
+    do { \
+        if (ar != ATUM_SUCCESS) { \
+            ERROR("%s failed @ %s:%d", function, __FILE__, __LINE__-1); \
+            return ATUM_FAILURE; \
         } \
     } while (0)
 
 static int remote_alloc(task_t target, mach_vm_address_t *address, mach_vm_size_t size, int flags)
 {
     kern_return_t kr = mach_vm_allocate(target, address, size, VM_FLAGS_ANYWHERE);
-    CHECK(kr, KERN_SUCCESS, "mach_vm_allocate");
+    MACH_CHECK("mach_vm_allocate");
     return ATUM_SUCCESS;
 }
 
@@ -69,14 +77,14 @@ int inject_library(pid_t target_pid, const char *lib)
 
     // Acquire target task port
     kr = task_for_pid(mach_task_self(), target_pid, &target);
-    CHECK(kr, KERN_SUCCESS, "task_for_pid");
+    MACH_CHECK("task_for_pid");
 
     // Allocate remote memory
     ar = remote_alloc(target, &stack, STACK_SIZE, VM_FLAGS_ANYWHERE);
-    CHECK(ar, ATUM_SUCCESS, "remote_alloc");
+    ATUM_CHECK("remote_alloc");
 
     ar = remote_alloc(target, &code, CODE_SIZE, VM_FLAGS_ANYWHERE);
-    CHECK(ar, ATUM_SUCCESS, "remote_alloc");
+    ATUM_CHECK("remote_alloc");
 
     // Patch code
     char *possible_patch_location = loader_code;
@@ -99,22 +107,28 @@ int inject_library(pid_t target_pid, const char *lib)
         }
     }
 
-    // Write the code
+    // Write the loader code
     kr = mach_vm_write(target, code, (vm_address_t) loader_code, sizeof(loader_code));
-    CHECK(kr, KERN_SUCCESS, "mach_vm_write");
+    MACH_CHECK("mach_vm_write");
 
     // Mark code executable
     kr = vm_protect(target, code, sizeof(loader_code), FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
-    CHECK(kr, KERN_SUCCESS, "vm_protect");
+    MACH_CHECK("vm_protect");
 
     // Mark stack rw
     kr = vm_protect(target, stack, STACK_SIZE, TRUE, VM_PROT_READ | VM_PROT_WRITE);
-    CHECK(kr, KERN_SUCCESS, "vm_protect");
+    MACH_CHECK("vm_protect");
 
-    // 5. Create thread
+    // Create thread
     thread_act_t thread;
     ar = create_remote_thread(target, &thread, stack, STACK_SIZE, code, CODE_SIZE);
-    CHECK(ar, ATUM_SUCCESS, "create_remote_thread");
+    ATUM_CHECK("create_remote_thread");
+
+    // Terminate thread
+    ar = terminate_remote_thread(target, thread);
+    ATUM_CHECK("terminate_remote_thread");
+
+    // TODO: Delloac?
 
     return ATUM_SUCCESS;
 }
