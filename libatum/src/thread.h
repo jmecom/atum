@@ -1,3 +1,5 @@
+#pragma once
+
 #include <mach/mach.h>
 
 int create_remote_thread(task_t target, thread_act_t *thread_out,

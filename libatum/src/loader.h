@@ -1,3 +1,5 @@
+#pragma once
+
 #ifdef __arm64__
 #error "No ARM support yet"
 #else

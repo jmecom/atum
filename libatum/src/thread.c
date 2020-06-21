@@ -13,10 +13,8 @@ static int x86_create_remote_thread(task_t target, thread_act_t *thread_out,
 
     memset(&state, 0, sizeof(state));
 
-    stack += 2048;
-
     state.__rip = (uint64_t) (vm_address_t) code;
-    state.__rsp = (uint64_t) stack;
+    state.__rsp = (uint64_t) stack + stack_size;
     state.__rbp = (uint64_t) stack;
 
     kern_return_t kr = thread_create_running(target, x86_THREAD_STATE64,
