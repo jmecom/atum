@@ -64,7 +64,7 @@ int inject_library(pid_t target_pid, const char *lib)
     int ar = ATUM_FAILURE;
     mach_error_t kr;
 
-    // 0. Check if target is 64bit and that library is present
+    // Check if target is 64bit and that library is present
     if (!process_is_64_bit(target_pid)) {
         ERROR("Target process (%d) is not 64bit", target_pid);
         return ATUM_FAILURE;

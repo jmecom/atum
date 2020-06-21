@@ -14,13 +14,16 @@ void count_threads(void)
     }
 
     fprintf(stderr, "[target] thread count: %d\n", thread_count);
+
+    for (int i = 0; i < thread_count; i++) {
+        mach_port_deallocate(mach_task_self(), threads[i]);
+    }
+    vm_deallocate(mach_task_self(), (vm_address_t)threads, sizeof(thread_t) * thread_count);
 }
 
 int main(void)
 {
-    int i = 0;
     for (;;) {
-        fprintf(stderr, "[target] %d\n", ++i);
         count_threads();
         sleep(1);
     }
