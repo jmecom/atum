@@ -6,7 +6,7 @@
 #include <dlfcn.h>
 
 #include "log.h"
-#include "loader.h"
+#include "trampoline.h"
 #include "util.h"
 #include "thread.h"
 
@@ -27,13 +27,26 @@ kern_return_t mach_vm_write(
 #define STACK_SIZE (65536)
 #define CODE_SIZE  (128)
 
+#define MACH_CHECK(function) \
+    do { \
+        if (kr != KERN_SUCCESS) { \
+            ERROR("%s failed @ %s:%d (\'%s\')", function, __FILE__, __LINE__-1, mach_error_string(kr)); \
+            return ATUM_MACH_FAILURE; \
+        } \
+    } while (0)
+
+#define ATUM_CHECK(function) \
+    do { \
+        if (ar != ATUM_SUCCESS) { \
+            ERROR("%s failed @ %s:%d", function, __FILE__, __LINE__-1); \
+            return ATUM_FAILURE; \
+        } \
+    } while (0)
+
 static int remote_alloc(task_t target, mach_vm_address_t *address, mach_vm_size_t size, int flags)
 {
-    kern_return_t kr;
-    if ((kr = mach_vm_allocate(target, address, size, VM_FLAGS_ANYWHERE)) != KERN_SUCCESS) {
-        ERROR("Failed to allocate memory ('%s')", mach_error_string(kr));
-        return ATUM_MACH_FAILURE;
-    }
+    kern_return_t kr = mach_vm_allocate(target, address, size, VM_FLAGS_ANYWHERE);
+    MACH_CHECK("mach_vm_allocate");
     return ATUM_SUCCESS;
 }
 
@@ -51,7 +64,7 @@ int inject_library(pid_t target_pid, const char *lib)
     int ar = ATUM_FAILURE;
     mach_error_t kr;
 
-    // 0. Check if target is 64bit and that library is present
+    // Check if target is 64bit and that library is present
     if (!process_is_64_bit(target_pid)) {
         ERROR("Target process (%d) is not 64bit", target_pid);
         return ATUM_FAILURE;
@@ -62,26 +75,19 @@ int inject_library(pid_t target_pid, const char *lib)
         return ATUM_FAILURE;
     }
 
-    // 1. Acquire target task port
+    // Acquire target task port
     kr = task_for_pid(mach_task_self(), target_pid, &target);
-    if (kr != KERN_SUCCESS) {
-        ERROR("task_for_pid on %d failed ('%s')", target_pid, mach_error_string(kr));
-        return ATUM_MACH_FAILURE;
-    }
+    MACH_CHECK("task_for_pid");
 
-    // 2. Allocate remote memory
+    // Allocate remote memory
     ar = remote_alloc(target, &stack, STACK_SIZE, VM_FLAGS_ANYWHERE);
-    if (ar != ATUM_SUCCESS) {
-        return ar;
-    }
+    ATUM_CHECK("remote_alloc");
 
     ar = remote_alloc(target, &code, CODE_SIZE, VM_FLAGS_ANYWHERE);
-    if (ar != ATUM_SUCCESS) {
-        return ar;
-    }
+    ATUM_CHECK("remote_alloc");
 
-    // 3. Patch code
-    char *possible_patch_location = loader_code;
+    // Patch code
+    char *possible_patch_location = trampoline;
     for (int i = 0; i < CODE_SIZE; i++) {
         possible_patch_location++;
 
@@ -101,33 +107,28 @@ int inject_library(pid_t target_pid, const char *lib)
         }
     }
 
-    // 4. Write the code
-    kr = mach_vm_write(target, code, (vm_address_t) loader_code, sizeof(loader_code));
-    if (kr != KERN_SUCCESS) {
-        ERROR("Unable to write code ('%s')", mach_error_string(kr));
-        return ATUM_MACH_FAILURE;
-    }
+    // Write the trampoline
+    kr = mach_vm_write(target, code, (vm_address_t) trampoline, sizeof(trampoline));
+    MACH_CHECK("mach_vm_write");
 
     // Mark code executable
-    kr = vm_protect(target, code, sizeof(loader_code), FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
-    if (kr != KERN_SUCCESS) {
-        ERROR("Couldn't mark code as executable ('%s')", mach_error_string(kr));
-        return ATUM_MACH_FAILURE;
-    }
+    kr = vm_protect(target, code, sizeof(trampoline), FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+    MACH_CHECK("vm_protect");
 
-    // Mark stack readble
+    // Mark stack rw
     kr = vm_protect(target, stack, STACK_SIZE, TRUE, VM_PROT_READ | VM_PROT_WRITE);
-    if (kr != KERN_SUCCESS) {
-        ERROR("Couldn't mark stack as readable ('%s')", mach_error_string(kr));
-        return ATUM_MACH_FAILURE;
-    }
+    MACH_CHECK("vm_protect");
 
-    // 5. Create thread
+    // Create thread
     thread_act_t thread;
     ar = create_remote_thread(target, &thread, stack, STACK_SIZE, code, CODE_SIZE);
-    if (ar != ATUM_SUCCESS) {
-        return ar;
-    }
+    ATUM_CHECK("create_remote_thread");
+
+    // Terminate thread
+    ar = terminate_remote_thread(target, thread);
+    ATUM_CHECK("terminate_remote_thread");
+
+    // TOOD: Deallocate?
 
     return ATUM_SUCCESS;
 }

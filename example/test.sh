@@ -3,5 +3,5 @@
 cd ../build/example
 ./target &
 sudo ./injector $! libpayload.dylib
-sleep 1
+sleep 3
 pkill target
