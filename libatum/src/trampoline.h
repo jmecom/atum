@@ -3,7 +3,7 @@
 #ifdef __arm64__
 #error "No ARM support yet"
 #else
-char loader_code[] =
+char trampoline[] =
     // "\xCC"                            // int3
 
     "\x55"                            // push       rbp

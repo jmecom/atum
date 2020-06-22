@@ -6,7 +6,7 @@
 #include <dlfcn.h>
 
 #include "log.h"
-#include "loader.h"
+#include "trampoline.h"
 #include "util.h"
 #include "thread.h"
 
@@ -87,7 +87,7 @@ int inject_library(pid_t target_pid, const char *lib)
     ATUM_CHECK("remote_alloc");
 
     // Patch code
-    char *possible_patch_location = loader_code;
+    char *possible_patch_location = trampoline;
     for (int i = 0; i < CODE_SIZE; i++) {
         possible_patch_location++;
 
@@ -107,12 +107,12 @@ int inject_library(pid_t target_pid, const char *lib)
         }
     }
 
-    // Write the loader code
-    kr = mach_vm_write(target, code, (vm_address_t) loader_code, sizeof(loader_code));
+    // Write the trampoline
+    kr = mach_vm_write(target, code, (vm_address_t) trampoline, sizeof(trampoline));
     MACH_CHECK("mach_vm_write");
 
     // Mark code executable
-    kr = vm_protect(target, code, sizeof(loader_code), FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+    kr = vm_protect(target, code, sizeof(trampoline), FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
     MACH_CHECK("vm_protect");
 
     // Mark stack rw
