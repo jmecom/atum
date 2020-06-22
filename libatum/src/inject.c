@@ -128,7 +128,7 @@ int inject_library(pid_t target_pid, const char *lib)
     ar = terminate_remote_thread(target, thread);
     ATUM_CHECK("terminate_remote_thread");
 
-    // TODO: Delloac?
+    // TOOD: Deallocate?
 
     return ATUM_SUCCESS;
 }
