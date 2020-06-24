@@ -4,13 +4,14 @@
 #include <sys/stat.h>
 #include <dlfcn.h>
 #include <mach/machine/thread_status.h>
+#include <stdlib.h>
+#include <limits.h>
 
 #include "log.h"
 #include "trampoline.h"
 #include "util.h"
 #include "thread.h"
 #include "mach_priv.h"
-
 
 #define STACK_SIZE (65536)
 #define CODE_SIZE  (128)
@@ -33,6 +34,8 @@
         } \
     } while (0)
 
+static mach_vm_address_t g_lib_addr = 0;
+
 static int remote_alloc(task_t target, mach_vm_address_t *address, mach_vm_size_t size, int flags)
 {
     kern_return_t kr = mach_vm_allocate(target, address, size, VM_FLAGS_ANYWHERE);
@@ -40,16 +43,16 @@ static int remote_alloc(task_t target, mach_vm_address_t *address, mach_vm_size_
     return ATUM_SUCCESS;
 }
 
-int inject_library(pid_t target_pid, const char *lib)
+int inject_library(pid_t target_pid, const char *lib_path)
 {
-    if (!lib) {
+    if (!lib_path) {
         return ATUM_FAILURE;
     }
 
     task_t target = MACH_PORT_NULL;
     mach_vm_address_t code = 0;
     mach_vm_address_t stack = 0;
-    struct stat statbuf;
+    char lib[PATH_MAX] = {0};
 
     int ar = ATUM_FAILURE;
     mach_error_t kr;
@@ -60,8 +63,8 @@ int inject_library(pid_t target_pid, const char *lib)
         return ATUM_FAILURE;
     }
 
-    if (stat(lib, &statbuf) != 0) {
-        ERROR("Cannot open library %s", lib);
+    if (realpath(lib_path, lib) != 0) {
+        ERROR("Cannot resolve library %s", lib_path);
         return ATUM_FAILURE;
     }
 
@@ -71,13 +74,19 @@ int inject_library(pid_t target_pid, const char *lib)
 
     // Allocate remote memory
 
+    // Allocate the library path in target
+    size_t path_size = strlen(lib) + 1;
+    kr = mach_vm_allocate(target, &g_lib_addr, path_size, VM_FLAGS_ANYWHERE);
+    MACH_CHECK("mach_vm_allocate");
+    kr = mach_vm_write(target, g_lib_addr, (vm_offset_t) lib, (mach_msg_type_number_t) path_size);
+    MACH_CHECK("mach_vm_write");
+
     // Set up the stack so that we return to our magic value
     uint64_t backtrace[] = {MAGIC_RETURN};
     ar = remote_alloc(target, &stack, STACK_SIZE + sizeof(backtrace), VM_FLAGS_ANYWHERE);
     ATUM_CHECK("remote_alloc");
 
-    kr = mach_vm_write(target, (stack + STACK_SIZE), (vm_offset_t) backtrace,
-            (mach_msg_type_number_t) sizeof(backtrace));
+    kr = mach_vm_write(target, stack + STACK_SIZE, (vm_offset_t) backtrace, (mach_msg_type_number_t) sizeof(backtrace));
     MACH_CHECK("mach_vm_write");
 
     ar = remote_alloc(target, &code, CODE_SIZE, VM_FLAGS_ANYWHERE);
@@ -99,9 +108,9 @@ int inject_library(pid_t target_pid, const char *lib)
         //     memcpy(possible_patch_location, &addr_dlopen, sizeof(uint64_t));
         // }
 
-        if (memcmp(possible_patch_location, "LIBLIBLIB", 9) == 0) {
-            strcpy(possible_patch_location, lib);
-        }
+        // if (memcmp(possible_patch_location, "LIBLIBLIB", 9) == 0) {
+        //     strcpy(possible_patch_location, lib);
+        // }
     }
 
     // Write the trampoline
@@ -141,8 +150,7 @@ int inject_library(pid_t target_pid, const char *lib)
 
         thread_basic_info_data_t thread_basic_info;
         mach_msg_type_number_t thread_basic_info_count = THREAD_BASIC_INFO_COUNT;
-        kr = thread_info(thread, THREAD_BASIC_INFO,
-                          (thread_info_t)&thread_basic_info, &thread_basic_info_count);
+        kr = thread_info(thread, THREAD_BASIC_INFO, (thread_info_t)&thread_basic_info, &thread_basic_info_count);
         MACH_CHECK("thread_info");
 
         /* Chech if we've already suspended the thread inside our exception handler */
@@ -161,7 +169,7 @@ int inject_library(pid_t target_pid, const char *lib)
             kr = thread_terminate(thread);
             MACH_CHECK("thead_terminate");
             /* and do some memory clean-up */
-            // kr = mach_vm_deallocate(task, rlibrary, path_size);
+            kr = mach_vm_deallocate(target, g_lib_addr, path_size);
             MACH_CHECK("mach_vm_deallocate");
             kr = mach_vm_deallocate(target, stack, STACK_SIZE);
             MACH_CHECK("mach_vm_deallocate");
@@ -170,7 +178,6 @@ int inject_library(pid_t target_pid, const char *lib)
             break;
         }
     }
-
 
     // Terminate thread
     // ar = terminate_thread(target, thread);
@@ -206,12 +213,15 @@ catch_exception_raise_state_identity(mach_port_t exception_port, mach_port_t thr
     if (((x86_thread_state64_t *)in_state)->__rip == MAGIC_RETURN) {
         /* Prepare the thread to execute dlopen() */
         ((x86_thread_state64_t *)out_state)->__rip = (uint64_t) &dlopen;
+        INFO("dlopen @ %p", &dlopen);
         ((x86_thread_state64_t *)out_state)->__rsi = RTLD_NOW | RTLD_LOCAL;
-        ((x86_thread_state64_t *)out_state)->__rdi = ((x86_thread_state64_t *)in_state)->__rbx;
+        // ((x86_thread_state64_t *)out_state)->__rdi = ((x86_thread_state64_t *)in_state)->__rbx;
+        // ((x86_thread_state64_t *)out_state)->__rbx = g_lib_addr;
+        ((x86_thread_state64_t *)out_state)->__rdi = (uint64_t) g_lib_addr;
         /* Preserve the stack pointer */
         uint64_t stack = ((x86_thread_state64_t *)in_state)->__rsp;
-        ((x86_thread_state64_t *)out_state)->__rsp =  stack;
-        /* Indicate that we've updateed this thread state and ready to resume it */
+        ((x86_thread_state64_t *)out_state)->__rsp = stack;
+        /* Indicate that we've updated this thread state and ready to resume it */
         *out_state_count = x86_THREAD_STATE64_COUNT;
 
         return KERN_SUCCESS;
