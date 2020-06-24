@@ -1,21 +1,10 @@
 #include "thread.h"
 
 #include <atum.h>
-#include <mach/mach.h>
 
+#include "mach_priv.h"
 #include "log.h"
 #include "util.h"
-
-kern_return_t
-mach_vm_deallocate(
-	mach_port_name_t target,
-	mach_vm_address_t address,
-	mach_vm_size_t size);
-
-kern_return_t
-mach_port_deallocate(
-	ipc_space_t	space,
-	mach_port_name_t name);
 
 static int x86_create_remote_thread(task_t target, thread_act_t *thread_out,
                                     mach_vm_address_t stack, size_t stack_size,
@@ -26,13 +15,21 @@ static int x86_create_remote_thread(task_t target, thread_act_t *thread_out,
     memset(&state, 0, sizeof(state));
 
     state.__rip = (uint64_t) (vm_address_t) code;
-    state.__rsp = (uint64_t) stack + stack_size;
+    state.__rsp = (uint64_t) stack + stack_size; // FIXME
     state.__rbp = (uint64_t) stack;
 
-    kern_return_t kr = thread_create_running(target, x86_THREAD_STATE64,
-        (thread_state_t) &state, x86_THREAD_STATE64_COUNT, thread_out);
+    // kern_return_t kr = thread_create_running(target, x86_THREAD_STATE64,
+        // (thread_state_t) &state, x86_THREAD_STATE64_COUNT, thread_out);
+    kern_return_t kr = thread_create(target, thread_out);
     if (kr != KERN_SUCCESS) {
-        ERROR("thread_create_running failed ('%s')", mach_error_string(kr));
+        ERROR("thread_create failed ('%s')", mach_error_string(kr));
+        return ATUM_FAILURE;
+    }
+
+    kr = thread_set_state(*thread_out, x86_THREAD_STATE64,
+                         (thread_state_t) &state, x86_THREAD_STATE64_COUNT);
+    if (kr != KERN_SUCCESS) {
+        ERROR("thread_set_state failed ('%s')", mach_error_string(kr));
         return ATUM_FAILURE;
     }
 
@@ -66,6 +63,39 @@ static int x86_terminate_remote_thread(task_t target, thread_act_t thread)
     }
 
     return ATUM_SUCCESS;
+}
+
+int register_exception_port_for_thread(thread_act_t thread)
+{
+    int kr = KERN_FAILURE;
+
+    mach_port_name_t exception_port;
+    kr = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &exception_port);
+    if (kr != KERN_SUCCESS) {
+        return -1;
+    }
+
+    kr = mach_port_insert_right(mach_task_self(), exception_port, exception_port,
+                                 MACH_MSG_TYPE_MAKE_SEND);
+    if (kr != KERN_SUCCESS) {
+        return -1;
+    }
+
+// TODO Fix build system
+#ifdef __x86_64__
+    thread_state_flavor_t flavor = x86_THREAD_STATE64;
+#elif
+#error "ARM is not yet supported"
+#endif
+
+    kr = thread_set_exception_ports(thread, EXC_MASK_ALL,
+                                    exception_port, EXCEPTION_STATE_IDENTITY,
+                                    flavor);
+    if (kr != KERN_SUCCESS) {
+        return -1;
+    }
+
+    return exception_port;
 }
 
 // TODO: Get rid of macros, update build system
