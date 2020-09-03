@@ -1,6 +1,6 @@
 # atum
 
-A code injection library for XNU-based systems (macOS, iOS, etc.)
+An (unfinished :)) code injection library for XNU-based systems (macOS, iOS, etc.)
 
 ## Building
 
